@@ -28,6 +28,13 @@ NGINX_CONFIG_TPL = 'nginx.conf.tpl'
 NGINX_SERVER_NAME = 'pylabber-test1'
 GUNICORN_BIND = '127.0.0.1:8000'
 
+ENV_VARS = {
+    'DEBUG': False,
+    'DB_NAME': PG_DATABASE,
+    'DB_USER': PG_USER,
+    'DB_PASSWORD': PG_PASSWORD,
+}
+
 
 @task
 def prepare_os(c):
@@ -92,10 +99,8 @@ def install_requirements(c):
 def create_dotenv(c, force=False):
     if force or c.run(f'test -f {DOT_ENV_FILE}', warn=True).failed:
         c.run(f'rm -rf {DOT_ENV_FILE}')
-        c.run(f'echo "DEBUG=False" >> {DOT_ENV_FILE}')
-        c.run(f'echo "DB_NAME={PG_DATABASE}" >> {DOT_ENV_FILE}')
-        c.run(f'echo "DB_USER={PG_USER}" >> {DOT_ENV_FILE}')
-        c.run(f'echo "DB_PASSWORD={PG_PASSWORD}" >> {DOT_ENV_FILE}')
+        for name, value in ENV_VARS.items():
+            c.run(f'echo "{name}={value}" >> {DOT_ENV_FILE}')
 
 
 @task
@@ -130,6 +135,7 @@ def configure_supervisor(c):
         'PYENV_GUNICORN_EXEC': PYENV_GUNICORN_EXEC,
         'USER': USER,
         'GUNICORN_BIND': GUNICORN_BIND,
+        'ENV_VARS': ','.join(f'{k}={v}' for k, v in ENV_VARS.items())
     }
     for k, v in config_params.items():
         c.run('sed -i "s/{{{k}}}/{v}/g" {remote_tpl_file}'.format(
