@@ -67,7 +67,8 @@ def install_pyenv(c):
 def create_venv(c):
     c.run(f'{PYENV_EXEC} update')
     c.run(f'{PYENV_EXEC} install {PYTHON_VERSION} --skip-existing')
-    c.run(f'{PYENV_EXEC} virtualenv {PYTHON_VERSION} {PYENV_NAME}')
+    c.run(f'{PYENV_EXEC} virtualenvs --bare | grep ^{PYENV_NAME}$ ||'
+          f' {PYENV_EXEC} virtualenv {PYTHON_VERSION} {PYENV_NAME}')
 
 
 @task
