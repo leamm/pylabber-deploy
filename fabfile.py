@@ -28,6 +28,9 @@ NGINX_CONFIG_TPL = 'nginx.conf.tpl'
 NGINX_SERVER_NAME = 'pylabber-test1'
 GUNICORN_BIND = '127.0.0.1:8000'
 
+SUPERUSER_LOGIN = 'admin'
+SUPERUSER_PASS = 'q1w2e3zaxscd'
+
 ENV_VARS = {
     'DEBUG': False,
     'DB_NAME': PG_DATABASE,
@@ -166,6 +169,15 @@ def configure_nginx(c):
     c.sudo(f'mv {remote_tpl_file} /etc/nginx/sites-available/pylabber')
     c.sudo('sudo ln -sf /etc/nginx/sites-available/pylabber /etc/nginx/sites-enabled/pylabber')
     c.sudo('service nginx reload')
+
+
+@task
+def create_superuser(c):
+    with c.cd(WORK_DIR):
+        c.run(f'export $(cat .env | xargs) && {PYENV_PYTHON_EXEC} manage.py shell -c '
+              f'"from django.contrib.auth import get_user_model; User = get_user_model();'
+              f'User.objects.filter(username=\'{SUPERUSER_LOGIN}\').exists() or '
+              f'User.objects.create_superuser(\'{SUPERUSER_LOGIN}\', \'admin@example.com\', \'{SUPERUSER_PASS}\')"')
 
 
 @task
