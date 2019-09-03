@@ -158,6 +158,7 @@ def configure_nginx(c):
     c.put(NGINX_CONFIG_TPL, '/tmp/')
     config_params = {
         'WORK_DIR': WORK_DIR,
+        'VUELABBER_WORK_DIR': os.path.join(VUELABBER_WORK_DIR, 'dist'),
         'NGINX_SERVER_NAME': NGINX_SERVER_NAME,
         'GUNICORN_BIND': GUNICORN_BIND,
     }
@@ -182,6 +183,13 @@ def create_superuser(c):
 
 
 @task
+def npm_build(c):
+    c.sudo('apt-get install -y npm')
+    with c.cd(VUELABBER_WORK_DIR):
+        c.run('npm install && npm run build')
+
+
+@task
 def deploy(c):
     prepare_os(c)
     prepare_postgres(c)
@@ -195,6 +203,8 @@ def deploy(c):
     configure_gunicorn(c)
     configure_supervisor(c)
     configure_nginx(c)
+    create_superuser(c)
+    npm_build(c)
 
 # TODO: vue frontend deploy
 # TODO: localdev
