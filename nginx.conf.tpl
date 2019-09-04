@@ -1,5 +1,5 @@
 server {
-    listen 80;
+    listen {VUELABBER_PORT};
     server_name {NGINX_SERVER_NAME};
     access_log  /var/log/nginx/vuelabber.access.log;
     error_log /var/log/nginx/vuelabber.error.log;
@@ -11,7 +11,7 @@ server {
 }
 
 server {
-    listen 8080;
+    listen {PYLABBER_PORT};
     server_name {NGINX_SERVER_NAME};
     access_log  /var/log/nginx/pylabber-django.access.log;
     error_log /var/log/nginx/pylabber-django.error.log;
