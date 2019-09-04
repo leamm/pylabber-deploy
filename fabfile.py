@@ -29,6 +29,7 @@ NGINX_SERVER_NAME = 'pylabber-test1'
 GUNICORN_BIND = '127.0.0.1:8000'
 PYLABBER_PORT = 8080
 VUELABBER_PORT = 80
+PROD_URL_API = f'http://{NGINX_SERVER_NAME}:{PYLABBER_PORT}/api'
 
 SUPERUSER_LOGIN = 'admin'
 SUPERUSER_PASS = 'q1w2e3zaxscd'
@@ -132,6 +133,14 @@ def configure_gunicorn(c):
 
 
 @task
+def configure_cors(c):
+    prod_base_url_esc = PROD_URL_API.replace('/', r'\/')
+    with c.cd(WORK_DIR):
+        c.run(f'''grep "CORS_ORIGIN_WHITELIST = \['{prod_base_url_esc}'\]" -q pylabber/settings.py || '''
+              f'''echo "CORS_ORIGIN_WHITELIST = [\'{PROD_URL_API}\']" >>  pylabber/settings.py''')
+
+
+@task
 def configure_supervisor(c):
     c.sudo('apt-get install -y supervisor')
     remote_tpl_file = f'/tmp/{SUPERVISOR_CONFIG_TPL}'
@@ -191,8 +200,8 @@ def npm_build(c):
     c.sudo('apt-get install -y npm')
     # TODO: rid of hardcoded config params at vuelabber(src/api/base_url.js)
     base_url_conf_file = os.path.join(VUELABBER_WORK_DIR, 'src/api/base_url.js')
-    prod_base_url = f'http://{NGINX_SERVER_NAME}:{PYLABBER_PORT}/api'.replace('/', r'\/')
-    c.run(f"""sed -i "s/const PRODUCTION =.*/const PRODUCTION = '{prod_base_url}'/g" {base_url_conf_file}""")
+    prod_base_url_esc = PROD_URL_API.replace('/', r'\/')
+    c.run(f"""sed -i "s/const PRODUCTION =.*/const PRODUCTION = '{prod_base_url_esc}'/g" {base_url_conf_file}""")
     c.run(f"""sed -i "s/const MODE.*$/const MODE = \'production\'/g" {base_url_conf_file}""")
     with c.cd(VUELABBER_WORK_DIR):
         c.run('npm install && npm run build')
@@ -210,6 +219,7 @@ def deploy(c):
     db_migrate(c)
     collect_static(c)
     configure_gunicorn(c)
+    configure_cors()
     configure_supervisor(c)
     configure_nginx(c)
     create_superuser(c)
