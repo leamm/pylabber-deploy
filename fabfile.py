@@ -30,6 +30,9 @@ GUNICORN_BIND = '127.0.0.1:8000'
 PYLABBER_PORT = 8080
 VUELABBER_PORT = 80
 PROD_URL_API = f'http://{NGINX_SERVER_NAME}:{PYLABBER_PORT}/api'
+PROD_URL_VUELABBER = 'http://{nginx_server_name}{vuelabber_port}'.format(
+    nginx_server_name=NGINX_SERVER_NAME,
+    vuelabber_port='' if str(VUELABBER_PORT) == '80' else f':{VUELABBER_PORT}')
 
 SUPERUSER_LOGIN = 'admin'
 SUPERUSER_PASS = 'q1w2e3zaxscd'
@@ -134,10 +137,10 @@ def configure_gunicorn(c):
 
 @task
 def configure_cors(c):
-    prod_base_url_esc = PROD_URL_API.replace('/', r'\/')
+    prod_base_url_esc = PROD_URL_VUELABBER.replace('/', r'\/')
     with c.cd(WORK_DIR):
         c.run(f'''grep "CORS_ORIGIN_WHITELIST = \['{prod_base_url_esc}'\]" -q pylabber/settings.py || '''
-              f'''echo "CORS_ORIGIN_WHITELIST = [\'{PROD_URL_API}\']" >>  pylabber/settings.py''')
+              f'''echo "CORS_ORIGIN_WHITELIST = [\'{PROD_URL_VUELABBER}\']" >>  pylabber/settings.py''')
 
 
 @task
