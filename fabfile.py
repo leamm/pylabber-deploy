@@ -25,6 +25,7 @@ PG_PASSWORD = 'CbdjoK9A3xH4'
 
 SUPERVISOR_CONFIG_TPL = 'supervisor.conf.tpl'
 NGINX_CONFIG_TPL = 'nginx.conf.tpl'
+PYLABBER_LOGGING_CONF = 'logging_conf.py'
 NGINX_SERVER_NAME = 'pylabber-test1'
 GUNICORN_BIND = '127.0.0.1:8000'
 PYLABBER_PORT = 8080
@@ -144,6 +145,14 @@ def configure_cors(c):
 
 
 @task
+def configure_logging(c):
+    c.put(PYLABBER_LOGGING_CONF, os.path.join(WORK_DIR, 'pylabber'))
+    with c.cd(WORK_DIR):
+        c.run(r'grep "import \* from logging_conf" -q pylabber/settings.py ||'
+              r' echo "import * from logging_conf" >> pylabber/settings.py')
+
+
+@task
 def configure_supervisor(c):
     c.sudo('apt-get install -y supervisor')
     remote_tpl_file = f'/tmp/{SUPERVISOR_CONFIG_TPL}'
@@ -228,5 +237,4 @@ def deploy(c):
     create_superuser(c)
     npm_build(c)
 
-# TODO: vue frontend deploy
 # TODO: localdev
