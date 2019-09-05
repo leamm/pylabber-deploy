@@ -1,0 +1,3 @@
+[submodule "vuelabber-dist"]
+	path = vuelabber-dist
+	url = git@github.com:leamm/vuelabber-dist.git

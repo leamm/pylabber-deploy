@@ -3,7 +3,8 @@ from fabric import task
 
 PYLABBER_REPO = 'https://github.com/ZviBaratz/pylabber.git'
 VUELABBER_REPO = 'https://github.com/ZviBaratz/vuelabber.git'
-USER = 'ubuntu'
+VUELABBER_DIST_REPO = 'git@github.com:leamm/vuelabber-dist.git'
+USER = 'user'
 WORK_DIR = f'/home/{USER}/pylabber'
 VUELABBER_WORK_DIR = f'/home/{USER}/vuelabber'
 PYTHON_VERSION = '3.6.9'
@@ -26,6 +27,7 @@ PG_PASSWORD = 'CbdjoK9A3xH4'
 SUPERVISOR_CONFIG_TPL = 'supervisor.conf.tpl'
 NGINX_CONFIG_TPL = 'nginx.conf.tpl'
 PYLABBER_LOGGING_CONF = 'logging_conf.py'
+VUELABBER_DIST_PATH_LOCAL = 'vuelabber-dist'
 
 GUNICORN_BIND = '127.0.0.1:8000'
 PYLABBER_PORT = 80
@@ -213,7 +215,7 @@ def npm_build(c):
     c.sudo('apt-get install -y npm')
     # TODO: rid of hardcoded config params at vuelabber(src/api/base_url.js)
     base_url_conf_file = os.path.join(VUELABBER_WORK_DIR, 'src/api/base_url.js')
-    prod_base_url_esc = 'http://{host}{port}/api'.format(
+    prod_base_url_esc = 'http://admin.{host}{port}/api'.format(
         host=c.original_host,
         port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}'
     ).replace('/', r'\/')
@@ -221,6 +223,19 @@ def npm_build(c):
     c.run(f"""sed -i "s/const MODE.*$/const MODE = \'production\'/g" {base_url_conf_file}""")
     with c.cd(VUELABBER_WORK_DIR):
         c.run('npm install && npm run build')
+
+
+@task
+def vuelabber_fetch_build(c):
+    c.local('tar cf /tmp/vuelabber-dist.tar vuelabber-dist')
+    c.put('/tmp/vuelabber-dist.tar', '/tmp/vuelabber-dist.tar')
+    prod_base_url_esc = 'http://admin.{host}{port}/api'.format(
+        host=c.original_host,
+        port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}'
+    ).replace('/', r'\/')
+    with c.cd(VUELABBER_WORK_DIR):
+        c.run(rf'tar xf /tmp/vuelabber-dist.tar && rm -rf dist && mv vuelabber-dist dist && '
+              rf'sed -i "s/https:\/\/pylabber.org\/api/{prod_base_url_esc}/g" dist/js/*')
 
 
 @task
@@ -240,6 +255,6 @@ def deploy(c):
     configure_supervisor(c)
     configure_nginx(c)
     create_superuser(c)
-    npm_build(c)
+    vuelabber_fetch_build(c)
 
 # TODO: localdev
