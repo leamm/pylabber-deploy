@@ -4,7 +4,7 @@ from fabric import task
 PYLABBER_REPO = 'https://github.com/ZviBaratz/pylabber.git'
 VUELABBER_REPO = 'https://github.com/ZviBaratz/vuelabber.git'
 VUELABBER_DIST_REPO = 'git@github.com:leamm/vuelabber-dist.git'
-USER = 'user'
+USER = 'ubuntu'
 WORK_DIR = f'/home/{USER}/pylabber'
 VUELABBER_WORK_DIR = f'/home/{USER}/vuelabber'
 PYTHON_VERSION = '3.6.9'
