@@ -148,8 +148,8 @@ def configure_cors(c):
 def configure_logging(c):
     c.put(PYLABBER_LOGGING_CONF, os.path.join(WORK_DIR, 'pylabber'))
     with c.cd(WORK_DIR):
-        c.run(r'grep "import \* from logging_conf" -q pylabber/settings.py ||'
-              r' echo "import * from logging_conf" >> pylabber/settings.py')
+        c.run(r'grep "from logging_conf import \*" -q pylabber/settings.py ||'
+              r' echo "from logging_conf import *" >> pylabber/settings.py')
 
 
 @task
