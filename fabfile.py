@@ -26,14 +26,10 @@ PG_PASSWORD = 'CbdjoK9A3xH4'
 SUPERVISOR_CONFIG_TPL = 'supervisor.conf.tpl'
 NGINX_CONFIG_TPL = 'nginx.conf.tpl'
 PYLABBER_LOGGING_CONF = 'logging_conf.py'
-NGINX_SERVER_NAME = 'pylabber.webgma.co.il'
+
 GUNICORN_BIND = '127.0.0.1:8000'
-PYLABBER_PORT = 8080
+PYLABBER_PORT = 80
 VUELABBER_PORT = 80
-PROD_URL_API = f'http://{NGINX_SERVER_NAME}:{PYLABBER_PORT}/api'
-PROD_URL_VUELABBER = 'http://{nginx_server_name}{vuelabber_port}'.format(
-    nginx_server_name=NGINX_SERVER_NAME,
-    vuelabber_port='' if str(VUELABBER_PORT) == '80' else f':{VUELABBER_PORT}')
 
 SUPERUSER_LOGIN = 'admin'
 SUPERUSER_PASS = 'q1w2e3zaxscd'
@@ -138,10 +134,14 @@ def configure_gunicorn(c):
 
 @task
 def configure_cors(c):
-    prod_base_url_esc = PROD_URL_VUELABBER.replace('/', r'\/')
+    prod_url_vuelabber = 'http://{host}{port}'.format(
+        host=c.original_host,
+        port='' if str(VUELABBER_PORT) == '80' else f':{VUELABBER_PORT}')
+
+    prod_url_vuelabber_esc = prod_url_vuelabber.replace('/', r'\/')
     with c.cd(WORK_DIR):
-        c.run(f'''grep "CORS_ORIGIN_WHITELIST = \['{prod_base_url_esc}'\]" -q pylabber/settings.py || '''
-              f'''echo "CORS_ORIGIN_WHITELIST = [\'{PROD_URL_VUELABBER}\']" >>  pylabber/settings.py''')
+        c.run(f'''grep "CORS_ORIGIN_WHITELIST = \['{prod_url_vuelabber_esc}'\]" -q pylabber/settings.py || '''
+              f'''echo "CORS_ORIGIN_WHITELIST = [\'{prod_url_vuelabber}\']" >>  pylabber/settings.py''')
 
 
 @task
@@ -182,7 +182,8 @@ def configure_nginx(c):
     config_params = {
         'WORK_DIR': WORK_DIR,
         'VUELABBER_WORK_DIR': os.path.join(VUELABBER_WORK_DIR, 'dist'),
-        'NGINX_SERVER_NAME': NGINX_SERVER_NAME,
+        'VUELABBER_SERVER_NAME': c.original_host,
+        'PYLABBER_SERVER_NAME': f'admin.{c.original_host}',
         'PYLABBER_PORT': str(PYLABBER_PORT),
         'VUELABBER_PORT': str(VUELABBER_PORT),
         'GUNICORN_BIND': GUNICORN_BIND,
@@ -212,7 +213,10 @@ def npm_build(c):
     c.sudo('apt-get install -y npm')
     # TODO: rid of hardcoded config params at vuelabber(src/api/base_url.js)
     base_url_conf_file = os.path.join(VUELABBER_WORK_DIR, 'src/api/base_url.js')
-    prod_base_url_esc = PROD_URL_API.replace('/', r'\/')
+    prod_base_url_esc = 'http://{host}{port}/api'.format(
+        host=c.original_host,
+        port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}'
+    ).replace('/', r'\/')
     c.run(f"""sed -i "s/const PRODUCTION =.*/const PRODUCTION = '{prod_base_url_esc}'/g" {base_url_conf_file}""")
     c.run(f"""sed -i "s/const MODE.*$/const MODE = \'production\'/g" {base_url_conf_file}""")
     with c.cd(VUELABBER_WORK_DIR):
