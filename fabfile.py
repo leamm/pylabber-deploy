@@ -3,7 +3,7 @@ from fabric import task
 
 PYLABBER_REPO = 'https://github.com/ZviBaratz/pylabber.git'
 VUELABBER_REPO = 'https://github.com/ZviBaratz/vuelabber.git'
-USER = 'user'
+USER = 'ubuntu'
 WORK_DIR = f'/home/{USER}/pylabber'
 VUELABBER_WORK_DIR = f'/home/{USER}/vuelabber'
 PYTHON_VERSION = '3.6.9'
@@ -26,7 +26,7 @@ PG_PASSWORD = 'CbdjoK9A3xH4'
 SUPERVISOR_CONFIG_TPL = 'supervisor.conf.tpl'
 NGINX_CONFIG_TPL = 'nginx.conf.tpl'
 PYLABBER_LOGGING_CONF = 'logging_conf.py'
-NGINX_SERVER_NAME = 'pylabber-test1'
+NGINX_SERVER_NAME = 'pylabber-test'
 GUNICORN_BIND = '127.0.0.1:8000'
 PYLABBER_PORT = 8080
 VUELABBER_PORT = 80
