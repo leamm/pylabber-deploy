@@ -16,7 +16,11 @@ server {
     access_log  /var/log/nginx/pylabber-django.access.log;
     error_log /var/log/nginx/pylabber-django.error.log;
 
-    location / {
+    location = / {
+        return 302 /admin/;
+    }
+
+    location /admin {
         proxy_pass http://{GUNICORN_BIND};
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
