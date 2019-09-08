@@ -20,7 +20,7 @@ server {
         return 302 /admin/;
     }
 
-    location /admin {
+    location ~ ^/(admin|api) {
         proxy_pass http://{GUNICORN_BIND};
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
