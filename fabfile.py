@@ -43,6 +43,41 @@ ENV_VARS = {
     'DB_PASSWORD': PG_PASSWORD,
 }
 
+MODE_DEV = 'dev'
+MODE_PROD = 'prod'
+
+
+def _get_domain(c, mode):
+    if mode == MODE_PROD:
+        return c.original_host
+    elif mode == MODE_DEV:
+        return f'{c.host}.xip.io'
+    else:
+        raise Exception(f'Unknown mode {mode}')
+
+
+def _vuelabber_domain(c, mode):
+    return _get_domain(c, mode)
+
+
+def _pylabber_admin_domain(c, mode):
+    return 'admin.{}'.format(_get_domain(c, mode))
+
+
+def _pylabber_admin_url(c, mode, api=False):
+    return 'http://{host}{port}{api_path}'.format(
+        host=_pylabber_admin_domain(c, mode),
+        port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}',
+        api_path='/api' if api else ''
+    )
+
+
+def _vuelabber_url(c, mode):
+    return 'http://{host}{port}'.format(
+        host=_vuelabber_domain(c, mode),
+        port='' if str(VUELABBER_PORT) == '80' else f':{VUELABBER_PORT}',
+    )
+
 
 @task
 def prepare_os(c):
@@ -135,15 +170,14 @@ def configure_gunicorn(c):
 
 
 @task
-def configure_cors(c):
-    prod_url_vuelabber = 'http://{host}{port}'.format(
-        host=c.original_host,
-        port='' if str(VUELABBER_PORT) == '80' else f':{VUELABBER_PORT}')
-
-    prod_url_vuelabber_esc = prod_url_vuelabber.replace('/', r'\/')
+def configure_cors(c, mode):
+    vuelabber_url = _vuelabber_url(c, mode)
+    vuelabber_url_esc = vuelabber_url.replace('/', r'\/')
     with c.cd(WORK_DIR):
-        c.run(f'''grep "CORS_ORIGIN_WHITELIST = \['{prod_url_vuelabber_esc}'\]" -q pylabber/settings.py || '''
-              f'''echo "CORS_ORIGIN_WHITELIST = [\'{prod_url_vuelabber}\']" >>  pylabber/settings.py''')
+        c.run(f'''export $(cat .env | xargs) && {PYENV_PYTHON_EXEC} ./manage.py shell -c '''
+              f'''"from pylabber import settings; print(settings.CORS_ORIGIN_WHITELIST)" | '''
+              f'''grep '{vuelabber_url_esc}' -q || echo "CORS_ORIGIN_WHITELIST = [\'{vuelabber_url}\']"'''
+              f''' >>  pylabber/settings.py''')
 
 
 @task
@@ -173,19 +207,19 @@ def configure_supervisor(c):
             remote_tpl_file=remote_tpl_file,
         ))
     c.sudo(f'mv {remote_tpl_file} /etc/supervisor/conf.d/pylabber.conf')
-    c.sudo('supervisorctl update')
+    c.sudo('supervisorctl restart all')
 
 
 @task
-def configure_nginx(c):
+def configure_nginx(c, mode):
     c.sudo('apt-get install -y nginx')
     remote_tpl_file = f'/tmp/{NGINX_CONFIG_TPL}'
     c.put(NGINX_CONFIG_TPL, '/tmp/')
     config_params = {
         'WORK_DIR': WORK_DIR,
         'VUELABBER_WORK_DIR': os.path.join(VUELABBER_WORK_DIR, 'dist'),
-        'VUELABBER_SERVER_NAME': c.original_host,
-        'PYLABBER_SERVER_NAME': f'admin.{c.original_host}',
+        'VUELABBER_SERVER_NAME': _vuelabber_domain(c, mode),
+        'PYLABBER_SERVER_NAME': _pylabber_admin_domain(c, mode),
         'PYLABBER_PORT': str(PYLABBER_PORT),
         'VUELABBER_PORT': str(VUELABBER_PORT),
         'GUNICORN_BIND': GUNICORN_BIND,
@@ -211,35 +245,38 @@ def create_superuser(c):
 
 
 @task
-def npm_build(c):
+def npm_build(c, mode):
     c.sudo('apt-get install -y npm')
     # TODO: rid of hardcoded config params at vuelabber(src/api/base_url.js)
     base_url_conf_file = os.path.join(VUELABBER_WORK_DIR, 'src/api/base_url.js')
-    prod_base_url_esc = 'http://admin.{host}{port}/api'.format(
-        host=c.original_host,
-        port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}'
-    ).replace('/', r'\/')
-    c.run(f"""sed -i "s/const PRODUCTION =.*/const PRODUCTION = '{prod_base_url_esc}'/g" {base_url_conf_file}""")
+    pylabber_api_url_esc = _pylabber_admin_url(c, mode, api=True).replace('/', r'\/')
+    c.run(f"""sed -i "s/const PRODUCTION =.*/const PRODUCTION = '{pylabber_api_url_esc}'/g" {base_url_conf_file}""")
     c.run(f"""sed -i "s/const MODE.*$/const MODE = \'production\'/g" {base_url_conf_file}""")
     with c.cd(VUELABBER_WORK_DIR):
         c.run('npm install && npm run build')
 
 
 @task
-def vuelabber_fetch_build(c):
+def vuelabber_fetch_build(c, mode):
     c.local('tar cf /tmp/vuelabber-dist.tar vuelabber-dist')
     c.put('/tmp/vuelabber-dist.tar', '/tmp/vuelabber-dist.tar')
-    prod_base_url_esc = 'http://admin.{host}{port}/api'.format(
-        host=c.original_host,
-        port='' if str(PYLABBER_PORT) == '80' else f':{PYLABBER_PORT}'
-    ).replace('/', r'\/')
+    pylabber_api_url_esc = _pylabber_admin_url(c, mode, api=True).replace('/', r'\/')
     with c.cd(VUELABBER_WORK_DIR):
         c.run(rf'tar xf /tmp/vuelabber-dist.tar && rm -rf dist && mv vuelabber-dist dist && '
-              rf'sed -i "s/https:\/\/pylabber.org\/api/{prod_base_url_esc}/g" dist/js/*')
+              rf'sed -i "s/https:\/\/pylabber.org\/api/{pylabber_api_url_esc}/g" dist/js/*')
 
 
 @task
-def deploy(c):
+def info(c, mode):
+    print('Admin URL', _pylabber_admin_url(c, mode))
+    print('API URL', _pylabber_admin_url(c, mode, api=True))
+    print('Vuelabber URL', _vuelabber_url(c, mode))
+    print('-' * 10)
+    print(f'Test user login: {SUPERUSER_LOGIN} pass:{SUPERUSER_PASS}')
+
+
+@task
+def deploy(c, mode=MODE_PROD):
     prepare_os(c)
     prepare_postgres(c)
     install_pyenv(c)
@@ -250,11 +287,10 @@ def deploy(c):
     db_migrate(c)
     collect_static(c)
     configure_gunicorn(c)
-    configure_cors(c)
+    configure_cors(c, mode)
     configure_logging(c)
     configure_supervisor(c)
-    configure_nginx(c)
+    configure_nginx(c, mode)
     create_superuser(c)
-    vuelabber_fetch_build(c)
-
-# TODO: localdev
+    vuelabber_fetch_build(c, mode)
+    info(c, mode)
