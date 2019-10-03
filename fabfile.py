@@ -1,5 +1,6 @@
 import os
-from fabric import task
+
+from fabric import Connection, task
 
 PYLABBER_REPO = 'https://github.com/ZviBaratz/pylabber.git'
 VUELABBER_REPO = 'https://github.com/ZviBaratz/vuelabber.git'
@@ -11,10 +12,6 @@ PYENV_BASHRC = f"""export PATH="~/.pyenv/bin:$PATH"
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 """
-PYENV_EXEC = '~/.pyenv/bin/pyenv'
-PYENV_PIP_EXEC = f'~/.pyenv/versions/{PYENV_NAME}/bin/pip'
-PYENV_PYTHON_EXEC = f'~/.pyenv/versions/{PYENV_NAME}/bin/python'
-PYENV_GUNICORN_EXEC = f'~/.pyenv/versions/{PYENV_NAME}/bin/gunicorn'
 
 PG_USER = 'pylabber'
 PG_DATABASE = 'pylabber'
@@ -32,44 +29,67 @@ VUELABBER_PORT = 80
 SUPERUSER_LOGIN = 'admin'
 SUPERUSER_PASS = 'q1w2e3zaxscd'
 
-ENV_VARS = {
-    'DEBUG': False,
-    'DB_NAME': PG_DATABASE,
-    'DB_USER': PG_USER,
-    'DB_PASSWORD': PG_PASSWORD,
-}
-
 MODE_DEV = 'dev'
 MODE_PROD = 'prod'
 
 
+def _is_local(c):
+    return not isinstance(c, Connection) or c.host.startswith('127.') or c.host == 'localhost'
+
+
+def _env_vars(mode):
+    return {
+        'DEBUG': mode != MODE_PROD,
+        'DB_NAME': PG_DATABASE,
+        'DB_USER': PG_USER,
+        'DB_PASSWORD': PG_PASSWORD,
+    }
+
+
 def _pylabber_workdir(c, mode):
-    if mode in [MODE_DEV, MODE_PROD]:
-        return f'/home/{c.user}/pylabber'
-    # elif mode == MODE_DEV:
-    #     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vuelabber')
+    # TODO: determine working directory by passed mode and 'is_local' flag
+    is_local = _is_local(c)
+    if is_local:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pylabber')
     else:
-        raise Exception(f'Unknown mode {mode}')
+        return f'/home/{c.user}/pylabber'
 
 
 def _pylabber_dotenv_file(c, mode):
     return os.path.join(_pylabber_workdir(c, mode), '.env')
 
 
+def _pyenv_exec(c):
+    return f'/home/{c.user}/.pyenv/bin/pyenv'
+
+
+def _pip_exec(c):
+    return f'/home/{c.user}/.pyenv/versions/{PYENV_NAME}/bin/pip'
+
+
+def _python_exec(c):
+    return f'/home/{c.user}/.pyenv/versions/{PYENV_NAME}/bin/python'
+
+
+def _gunicorn_exec(c):
+    return f'/home/{c.user}/.pyenv/versions/{PYENV_NAME}/bin/gunicorn'
+
+
 def _vuelabber_workdir(c, mode):
-    if mode in [MODE_DEV, MODE_PROD]:
-        return f'/home/{c.user}/vuelabber'
-    # elif mode == MODE_DEV:
-    #     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vuelabber')
+    # TODO: determine working directory by passed mode and 'is_local' flag
+    is_local = _is_local(c)
+    if is_local:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vuelabber')
     else:
-        raise Exception(f'Unknown mode {mode}')
+        return f'/home/{c.user}/vuelabber'
 
 
 def _get_domain(c, mode):
     if mode == MODE_PROD:
         return c.original_host
     elif mode == MODE_DEV:
-        return f'{c.host}.xip.io'
+        host = '127.0.0.1' if _is_local(c) else c.host
+        return f'{host}.xip.io'
     else:
         raise Exception(f'Unknown mode {mode}')
 
@@ -102,12 +122,11 @@ def prepare_os(c):
     c.sudo('locale-gen')
     c.sudo('DEBIAN_FRONTEND=noninteractive sudo apt-get -y update && sudo apt-get -y upgrade')
     c.sudo('apt-get install -y git build-essential libreadline-dev zlib1g-dev libssl-dev libbz2-dev libsqlite3-dev'
-           ' libffi-dev')
+           ' libffi-dev postgresql-10 libpq-dev')
 
 
 @task
 def prepare_postgres(c):
-    c.sudo('apt-get install -y postgresql-10 libpq-dev')
     c.sudo(f'psql -c "CREATE USER {PG_USER} WITH PASSWORD \'{PG_PASSWORD}\';"'
            f' -c "CREATE DATABASE {PG_DATABASE};"'
            f' -c "GRANT ALL ON DATABASE {PG_DATABASE} TO {PG_USER}"', user='postgres')
@@ -123,10 +142,11 @@ def install_pyenv(c):
 
 @task
 def create_venv(c):
-    c.run(f'{PYENV_EXEC} update')
-    c.run(f'{PYENV_EXEC} install {PYTHON_VERSION} --skip-existing')
-    c.run(f'{PYENV_EXEC} virtualenvs --bare | grep ^{PYENV_NAME}$ ||'
-          f' {PYENV_EXEC} virtualenv {PYTHON_VERSION} {PYENV_NAME}')
+    pyenv_exec = _pyenv_exec(c)
+    c.run(f'{pyenv_exec} update')
+    c.run(f'{pyenv_exec} install {PYTHON_VERSION} --skip-existing')
+    c.run(f'{pyenv_exec} virtualenvs --bare | grep ^{PYENV_NAME}$ ||'
+          f' {pyenv_exec} virtualenv {PYTHON_VERSION} {PYENV_NAME}')
 
 
 @task
@@ -148,17 +168,19 @@ def create_workdirs(c, mode):
 @task
 def install_requirements(c, mode):
     pylabber_work_dir = _pylabber_workdir(c, mode)
+    pyenv_pip_exec = _pip_exec(c)
     with c.cd(pylabber_work_dir):
-        c.run(f'{PYENV_PIP_EXEC} install --upgrade pip setuptools')
+        c.run(f'{pyenv_pip_exec} install --upgrade pip setuptools')
         # TODO: fix setup.py at django_mri package: rid of requirements file reading to set dependencies
         c.run(f'rm -rf /tmp/django_mri_repo &&'
               f' git clone https://github.com/ZviBaratz/django_mri.git /tmp/django_mri_repo &&'
               f' sed -i "/^http.*$/d" /tmp/django_mri_repo/requirements/common.txt &&'
-              f' {PYENV_PIP_EXEC} install /tmp/django_mri_repo/ &&'
+              f' {pyenv_pip_exec} install /tmp/django_mri_repo/ &&'
               f' rm -rf /tmp/django_mri_repo')
-        c.run(f'cat requirements/common.txt | grep -v django_mri | xargs {PYENV_PIP_EXEC} install')
-        c.run(f'{PYENV_PIP_EXEC} install -r requirements/dev.txt')
-        c.run(f'{PYENV_PIP_EXEC} install treebeard')
+        c.run(f'cat requirements/common.txt | grep -v django_mri | xargs {pyenv_pip_exec} install')
+        c.run(f'{pyenv_pip_exec} install -r requirements/dev.txt')
+        c.run(f'{pyenv_pip_exec} install treebeard')
+        c.run(f'{pyenv_pip_exec} install gunicorn')
 
 
 @task
@@ -166,33 +188,28 @@ def create_dotenv(c, mode, force=False):
     dot_env_file = _pylabber_dotenv_file(c, mode)
     if force or c.run(f'test -f {dot_env_file}', warn=True).failed:
         c.run(f'rm -rf {dot_env_file}')
-        for name, value in ENV_VARS.items():
+        for name, value in _env_vars(mode).items():
             c.run(f'echo "{name}={value}" >> {dot_env_file}')
 
 
 @task
 def db_migrate(c, mode):
     pylabber_work_dir = _pylabber_workdir(c, mode)
+    pyenv_python_exec = _python_exec(c)
     with c.cd(pylabber_work_dir):
         # TODO: add env.read_env(os.path.join(BASE_DIR, '.env')) to settings.py
         c.run(f'export $(cat .env | xargs) &&'
-              f' {PYENV_PYTHON_EXEC} ./manage.py makemigrations &&'
-              f' {PYENV_PYTHON_EXEC} ./manage.py migrate')
+              f' {pyenv_python_exec} ./manage.py makemigrations &&'
+              f' {pyenv_python_exec} ./manage.py migrate')
 
 
 @task
 def collect_static(c, mode):
     pylabber_work_dir = _pylabber_workdir(c, mode)
+    pyenv_python_exec = _python_exec(c)
     with c.cd(pylabber_work_dir):
         c.run('mkdir -p static dist node_modules')
-        c.run(f'{PYENV_PYTHON_EXEC} ./manage.py collectstatic --no-input')
-
-
-@task
-def configure_gunicorn(c, mode):
-    pylabber_work_dir = _pylabber_workdir(c, mode)
-    with c.cd(pylabber_work_dir):
-        c.run(f'{PYENV_PIP_EXEC} install gunicorn')
+        c.run(f'{pyenv_python_exec} ./manage.py collectstatic --no-input')
 
 
 @task
@@ -200,8 +217,9 @@ def configure_cors(c, mode):
     vuelabber_url = _vuelabber_url(c, mode)
     vuelabber_url_esc = vuelabber_url.replace('/', r'\/')
     pylabber_work_dir = _pylabber_workdir(c, mode)
+    pyenv_python_exec = _python_exec(c)
     with c.cd(pylabber_work_dir):
-        c.run(f'''export $(cat .env | xargs) && {PYENV_PYTHON_EXEC} ./manage.py shell -c '''
+        c.run(f'''export $(cat .env | xargs) && {pyenv_python_exec} ./manage.py shell -c '''
               f'''"from pylabber import settings; print(settings.CORS_ORIGIN_WHITELIST)" | '''
               f'''grep '{vuelabber_url_esc}' -q || echo "CORS_ORIGIN_WHITELIST = [\'{vuelabber_url}\']"'''
               f''' >>  pylabber/settings.py''')
@@ -226,10 +244,10 @@ def configure_supervisor(c, mode):
     c.put(SUPERVISOR_CONFIG_TPL, '/tmp/')
     config_params = {
         'WORK_DIR': _pylabber_workdir(c, mode),
-        'PYENV_GUNICORN_EXEC': PYENV_GUNICORN_EXEC,
+        'PYENV_GUNICORN_EXEC': _gunicorn_exec(c),
         'USER': c.user,
         'GUNICORN_BIND': GUNICORN_BIND,
-        'ENV_VARS': ','.join(f'{k}={v}' for k, v in ENV_VARS.items())
+        'ENV_VARS': ','.join(f'{k}={v}' for k, v in _env_vars(mode).items())
     }
     for k, v in config_params.items():
         c.run('sed -i "s/{{{k}}}/{v}/g" {remote_tpl_file}'.format(
@@ -238,7 +256,7 @@ def configure_supervisor(c, mode):
             remote_tpl_file=remote_tpl_file,
         ))
     c.sudo(f'mv {remote_tpl_file} /etc/supervisor/conf.d/pylabber.conf')
-    c.sudo('supervisorctl restart all')
+    c.sudo('supervisorctl reload')
 
 
 @task
@@ -269,8 +287,9 @@ def configure_nginx(c, mode):
 @task
 def create_superuser(c, mode):
     pylabber_work_dir = _pylabber_workdir(c, mode)
+    pyenv_python_exec = _python_exec(c)
     with c.cd(pylabber_work_dir):
-        c.run(f'export $(cat .env | xargs) && {PYENV_PYTHON_EXEC} manage.py shell -c '
+        c.run(f'export $(cat .env | xargs) && {pyenv_python_exec} manage.py shell -c '
               f'"from django.contrib.auth import get_user_model; User = get_user_model();'
               f'User.objects.filter(username=\'{SUPERUSER_LOGIN}\').exists() or '
               f'User.objects.create_superuser(\'{SUPERUSER_LOGIN}\', \'admin@example.com\', \'{SUPERUSER_PASS}\')"')
@@ -309,25 +328,29 @@ def info(c, mode):
     print('API URL', _pylabber_admin_url(c, mode, api=True))
     print('Vuelabber URL', _vuelabber_url(c, mode))
     print('-' * 10)
-    print(f'Test user login: {SUPERUSER_LOGIN} pass:{SUPERUSER_PASS}')
+    print(f'Test user: {SUPERUSER_LOGIN} {SUPERUSER_PASS}')
 
 
 @task
 def deploy(c, mode=MODE_PROD):
-    prepare_os(c)
+    is_local = _is_local(c)
+    if not is_local:
+        prepare_os(c)
     prepare_postgres(c)
-    install_pyenv(c)
-    create_venv(c)
+    if not is_local:
+        install_pyenv(c)
+        create_venv(c)
     create_workdirs(c, mode)
     install_requirements(c, mode)
     create_dotenv(c, mode)
     db_migrate(c, mode)
     collect_static(c, mode)
-    configure_gunicorn(c, mode)
     configure_cors(c, mode)
-    configure_logging(c, mode)
-    configure_supervisor(c, mode)
-    configure_nginx(c, mode)
+    if not is_local:
+        configure_logging(c, mode)
+        configure_supervisor(c, mode)
+        configure_nginx(c, mode)
     create_superuser(c, mode)
-    vuelabber_fetch_build(c, mode)
+    if not is_local:
+        vuelabber_fetch_build(c, mode)
     info(c, mode)
